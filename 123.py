@@ -1,5 +1,5 @@
 from hikkatl.types import Message
-from .. import loader
+from .. import loader, utils  # Import utils here
 import logging
 import asyncio
 
