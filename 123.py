@@ -19,21 +19,21 @@ class AutoBonusModule(loader.Module):
                 "chat_id",
                 None,
                 "ID чата, куда отправлять сообщения. Оставьте пустым, чтобы отключить.",
-                validator=loader.validators.TelegramID(),  # Use TelegramID validator
+                validator=loader.validators.TelegramID(),  # Используем TelegramID валидатор
             )
         )
 
     async def client_ready(self):
-        """Вызывается, когда клиент Telegram готов."""
+        """Вызывается, когда Telegram клиент готов к работе."""
         self.chat_id = self.config["chat_id"]
         if self.chat_id:
             asyncio.create_task(self.bonus_loop())
 
     async def bonus_loop(self):
-        """Зацикленная задача для отправки сообщения о бонусе."""
+        """Циклическая задача для отправки сообщения о бонусе."""
         while True:
             if not self.chat_id:
-                self.log.debug("chat_id не задан.  Цикл остановлен.")
+                self.log.debug("chat_id не задан. Цикл остановлен.")
                 return
 
             try:
@@ -41,13 +41,14 @@ class AutoBonusModule(loader.Module):
                 self.log.info(f"Отправлено сообщение о бонусе в {self.chat_id}")
             except Exception as e:
                 self.log.error(f"Ошибка при отправке сообщения: {e}")
-                #  Проверяем, является ли ошибка причиной неверного chat_id
+                # Проверяем, является ли ошибка неверным chat_id
                 if "chat_id invalid" in str(e):
                     self.log.error(self.strings("invalid_chat_id"))
-                    self.chat_id = None  # Отключаем отправку, если chat_id неверный.
+                    self.chat_id = None  # Отключаем отправку, если chat_id неверный
                     self.config["chat_id"] = None
-                    return #завершаем цикл
-            await asyncio.sleep(2 × 60 × 60)  # Пауза на 2 часа (7200 секунд)
+                    return #Завершаем цикл
+
+            await asyncio.sleep(60 * 60)  # Пауза на 1 час (3600 секунд)
 
     @loader.command(
         ru_doc="Установить/проверить chat_id для отправки сообщений о бонусах",
@@ -62,7 +63,6 @@ class AutoBonusModule(loader.Module):
           self.config["chat_id"] = chat_id
           self.chat_id = chat_id #обновляем chat_id для работы bonus_loop
           await message.edit(f"chat_id установлен на {chat_id}. Перезапустите модуль для применения.")
-
           if not asyncio.current_task().done():
             asyncio.create_task(self.bonus_loop())
         except ValueError:
