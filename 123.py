@@ -1,78 +1,76 @@
 from hikkatl.types import Message
-from .. import loader, utils  # Import utils here (Corrected)
-import logging
+from .. import loader
 import asyncio
-
-logger = logging.getLogger(__name__)
 
 
 @loader.tds
-class StockroomFavoriteButtons(loader.Module):
-    """Сохраняет инлайн кнопки из бота @stockroom_yt_bot в избранное."""
-
+class AutoBonusModule(loader.Module):
+    """Автоматически отправляет сообщение о бонусе в указанный чат."""
     strings = {
-        "name": "StockroomFavoriteButtons",
-        "scanning": "Сканирую сообщения в @stockroom_yt_bot на наличие инлайн кнопок...",
-        "no_buttons_found": "Инлайн кнопки не найдены в @stockroom_yt_bot.",
-        "buttons_saved": "Сохранил {} инлайн кнопок из @stockroom_yt_bot в избранное.",
-        "error_scanning": "Произошла ошибка при сканировании сообщений: {}",
+        "name": "AutoBonus",
+        "bonus_message": "🎁 Бонус",
+        "no_chat_id": "Укажите chat_id для отправки сообщений.",
+        "invalid_chat_id": "Неверный chat_id. Проверьте идентификатор чата.",
     }
 
-    async def client_ready(self, client, db):
-        """Вызывается при загрузке модуля."""
-        self._client = client
-        self._db = db
-        self._me = await client.get_me()
-        self._favorite_buttons = self.pointer("favorite_buttons", [])
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "chat_id",
+                None,
+                "ID чата, куда отправлять сообщения. Оставьте пустым, чтобы отключить.",
+                validator=loader.validators.TelegramID(),  # Use TelegramID validator
+            )
+        )
+
+    async def client_ready(self):
+        """Вызывается, когда клиент Telegram готов."""
+        self.chat_id = self.config["chat_id"]
+        if self.chat_id:
+            asyncio.create_task(self.bonus_loop())
+
+    async def bonus_loop(self):
+        """Зацикленная задача для отправки сообщения о бонусе."""
+        while True:
+            if not self.chat_id:
+                self.log.debug("chat_id не задан.  Цикл остановлен.")
+                return
+
+            try:
+                await self._client.send_message(self.chat_id, self.strings("bonus_message"))
+                self.log.info(f"Отправлено сообщение о бонусе в {self.chat_id}")
+            except Exception as e:
+                self.log.error(f"Ошибка при отправке сообщения: {e}")
+                #  Проверяем, является ли ошибка причиной неверного chat_id
+                if "chat_id invalid" in str(e):
+                    self.log.error(self.strings("invalid_chat_id"))
+                    self.chat_id = None  # Отключаем отправку, если chat_id неверный.
+                    self.config["chat_id"] = None
+                    return #завершаем цикл
+            await asyncio.sleep(2 × 60 × 60)  # Пауза на 2 часа (7200 секунд)
 
     @loader.command(
-        ru_doc="Сканирует @stockroom_yt_bot и добавляет инлайн кнопки в избранное.",
+        ru_doc="Установить/проверить chat_id для отправки сообщений о бонусах",
+        alias="setbonuschat"
     )
-    async def stockroomfav(self, message: Message):
-        """Сканирует @stockroom_yt_bot и добавляет инлайн кнопки в избранное."""
+    async def bonuschat(self, message: Message):
+      """Установить/проверить chat_id для отправки сообщений о бонусах"""
+      args = utils.get_args_raw(message)
+      if args:
         try:
-            await utils.answer(message, self.strings("scanning"))
+          chat_id = int(args)
+          self.config["chat_id"] = chat_id
+          self.chat_id = chat_id #обновляем chat_id для работы bonus_loop
+          await message.edit(f"chat_id установлен на {chat_id}. Перезапустите модуль для применения.")
 
-            bot_username = "stockroom_yt_bot"
-            bot_entity = await self._client.get_entity(bot_username)
-            button_count = 0
-
-            async for msg in self._client.iter_messages(bot_entity):
-                if msg.reply_markup and hasattr(msg.reply_markup, 'rows'):
-                    for row in msg.reply_markup.rows:
-                        for button in row.buttons:
-                            if hasattr(button, 'url'):
-                                if button.url not in self._favorite_buttons:
-                                    self._favorite_buttons.append(button.url)
-                                    button_count += 1
-                            elif hasattr(button, 'callback_data'): # check for callback data instead of url
-                                data_str = button.callback_data.decode("utf-8")
-                                if data_str not in self._favorite_buttons:
-                                    self._favorite_buttons.append(data_str)
-                                    button_count += 1
-
-            if button_count == 0:
-                await utils.answer(message, self.strings("no_buttons_found"))
-            else:
-                await utils.answer(message, self.strings("buttons_saved").format(button_count))
-
+          if not asyncio.current_task().done():
+            asyncio.create_task(self.bonus_loop())
+        except ValueError:
+          await message.edit("Неверный chat_id. Должно быть целым числом.")
         except Exception as e:
-            logger.exception("Error scanning @stockroom_yt_bot:")
-            await utils.answer(message, self.strings("error_scanning").format(str(e)))
-
-    @loader.command(
-        ru_doc="Показывает сохраненные инлайн кнопки из избранного.",
-    )
-    async def showfav(self, message: Message):
-      """Показывает сохраненные инлайн кнопки из избранного."""
-      buttons = self._favorite_buttons or []
-
-      if not buttons:
-        await utils.answer(message, "No saved buttons found.")
-        return
-
-      output = "Сохраненные Избранные Кнопки:\n"
-      for i, button in enumerate(buttons):
-        output += f"{i + 1}. {button}\n"
-
-      await utils.answer(message, output)
+          await message.edit(f"Ошибка: {e}")
+      else:
+        if self.chat_id:
+          await message.edit(f"Текущий chat_id: {self.chat_id}")
+        else:
+          await message.edit(self.strings("no_chat_id"))
